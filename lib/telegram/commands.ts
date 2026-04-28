@@ -54,10 +54,15 @@ async function cmdHelp(ctx: CommandContext): Promise<void> {
   const text = [
     '*KumiBooks コマンド一覧*',
     '',
-    '`/whoami` — 自分のtg_idと権限を表示',
-    '`/help` — このヘルプ',
+    '*記帳* (自然文)',
+    '`広告費5000円` / `FX +3万` / `田中さんから50万入金` のように送ると、',
+    'AIが解釈して確認カードを返します。✅で記帳、❌でキャンセル。',
     '',
-    '_Sprint 1 段階のため、記帳・照会コマンドは未実装です。_'
+    '*コマンド*',
+    '`/whoami` — 自分のtg_idと権限を表示',
+    '`/help`   — このヘルプ',
+    '',
+    '_照会系 (/balance /today /month /list /undo) は Sprint 3 で実装予定。_'
   ].join('\n');
   await sendMessage({
     chatId: ctx.message.chat.id,

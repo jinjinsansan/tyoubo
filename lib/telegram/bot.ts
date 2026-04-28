@@ -101,6 +101,38 @@ export async function answerCallbackQuery(
   await apiCall('answerCallbackQuery', payload);
 }
 
+export interface EditMessageOptions {
+  chatId: number | string;
+  messageId: number;
+  text: string;
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML';
+  inlineKeyboard?: InlineKeyboardButton[][] | null;
+  disableWebPagePreview?: boolean;
+}
+
+/**
+ * Replace the text + (optionally) inline keyboard of an existing message.
+ * Pass `inlineKeyboard: null` to remove the buttons entirely.
+ */
+export async function editMessageText(
+  opts: EditMessageOptions
+): Promise<TelegramMessage> {
+  const payload: Record<string, unknown> = {
+    chat_id: opts.chatId,
+    message_id: opts.messageId,
+    text: opts.text,
+    disable_web_page_preview: opts.disableWebPagePreview ?? true
+  };
+  if (opts.parseMode) payload.parse_mode = opts.parseMode;
+  if (opts.inlineKeyboard !== undefined) {
+    payload.reply_markup =
+      opts.inlineKeyboard === null
+        ? { inline_keyboard: [] }
+        : { inline_keyboard: opts.inlineKeyboard };
+  }
+  return apiCall<TelegramMessage>('editMessageText', payload);
+}
+
 export async function getMe(): Promise<TelegramUser> {
   return apiCall<TelegramUser>('getMe', {});
 }

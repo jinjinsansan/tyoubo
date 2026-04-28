@@ -7,10 +7,20 @@
 ## 開発進捗
 
 - [x] **Sprint 1**: プロジェクト土台 / Sheetsクライアント / 環境変数zod検証 / Telegram `/whoami`
-- [ ] Sprint 2: 自然文記帳 (Function Calling) + 確認ボタン + audit_log
+- [x] **Sprint 2**: 自然文記帳 (Claude Opus 4.7 Function Calling) + 確認ボタン + audit_log fail-closed
 - [ ] Sprint 3: 残高・損益照会、`/balance` `/today` `/month` `/list` `/undo`
 - [ ] Sprint 4: 月次レポート Cron
 - [ ] Sprint 5: エラーハンドリング強化 / READMEと受け入れテスト整備
+
+### Sprint 2 で動くこと
+
+- 「広告費5000円」「FX +3万」「田中さんから50万入金」のような自然文をTelegramに送ると、AIが構造化して確認カードを返す
+- ✅ボタンで `transactions` シートに append、`audit_log` シートにbefore/after記録（fail-closed: 監査ログ失敗で取引中止）
+- ❌でキャンセル、5分間操作なしで自動失効
+- 不確かな抽出は `review_flag=true` で記録され、確認カードに警告表示
+- LLMはOpus 4.7プライマリ → Sonnet 4.6フォールバック（5xx/rate-limited時）
+- カテゴリマスタを動的にプロンプトへ注入（5分キャッシュ）
+- 投資家・関係者名は `counterparty` カラムへ正規化
 
 ## Sprint 1 セットアップ
 
@@ -77,16 +87,28 @@ curl -F "url=https://<your-public-host>/api/telegram/webhook?secret=<TELEGRAM_WE
 │   ├── layout.tsx
 │   └── page.tsx
 ├── lib/
+│   ├── llm/
+│   │   ├── client.ts                 Anthropic SDK + fallback
+│   │   ├── prompts.ts                System prompt + record_transaction tool
+│   │   └── parse-transaction.ts      自然文→ParsedTransaction
 │   ├── sheets/
 │   │   ├── client.ts                 Sheets API ラッパ
-│   │   └── members.ts                仲間allowlist
+│   │   ├── members.ts                仲間allowlist
+│   │   ├── categories.ts             カテゴリマスタ (5分TTLキャッシュ)
+│   │   ├── transactions.ts           appendTransaction (audit先, sheet後)
+│   │   └── audit.ts                  logAudit (fail-closed)
 │   ├── telegram/
-│   │   ├── bot.ts                    Bot APIラッパ
+│   │   ├── bot.ts                    sendMessage / editMessageText / answerCallbackQuery
 │   │   ├── commands.ts               /whoami /help
-│   │   └── handlers.ts               update dispatcher
+│   │   ├── format.ts                 確認カード・記帳済みカードのレンダ
+│   │   └── handlers.ts               update + callback_query dispatcher
 │   └── utils/
 │       ├── env.ts                    zod環境変数検証
-│       └── logger.ts                 構造化ログ
+│       ├── logger.ts                 シークレット自動マスキング構造化ログ
+│       ├── id.ts                     UUID / token / JST today
+│       └── pending.ts                Pending state (Upstash REST + memory fallback)
+├── types/
+│   └── transaction.ts                TxType / ParsedTransaction / PendingTransaction
 ├── .env.local.example
 ├── KumiBooks_spec_v1.md
 ├── next.config.mjs
@@ -111,3 +133,14 @@ curl -F "url=https://<your-public-host>/api/telegram/webhook?secret=<TELEGRAM_WE
 - メンバーは `members` シートで `active=TRUE` のみ操作可
 - グループID違いのメッセージは無視
 - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` などは `lib/utils/logger.ts` でログ自動マスキング
+- 確認ボタン (`callback_query`) は記帳者本人のtg_idのみ受け付け
+- audit_log は **fail-closed**: 監査ログ書き込み失敗時は `transactions` も書かない
+
+## Pending state について
+
+Sprint 2 で導入した記帳確認の一時保存先：
+
+- `UPSTASH_REDIS_REST_URL` / `_TOKEN` を設定すると Upstash Redis を使用（5分TTL）
+- 未設定なら in-memory Map（dev用） — **Vercel Serverless本番ではインスタンス間で状態共有されないため Upstash 必須**
+
+ローカル開発なら未設定で動くが、本番デプロイ時は Upstash Redis を必ず構成する。
