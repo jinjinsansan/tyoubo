@@ -12,6 +12,7 @@ import { appendTransaction } from '@/lib/sheets/transactions';
 import { logAudit } from '@/lib/sheets/audit';
 import { SHEETS } from '@/lib/sheets/client';
 import { parseTransaction } from '@/lib/llm/parse-transaction';
+import { answerQuery } from '@/lib/llm/answer-query';
 import {
   deletePending,
   getPending,
@@ -112,17 +113,25 @@ async function handleFreeFormMessage(msg: TelegramMessage): Promise<void> {
   }
 
   if (!parsed.is_transaction) {
-    await sendMessage({
-      chatId: msg.chat.id,
-      text: [
-        'メッセージから取引情報を抽出できませんでした。',
-        '',
-        '例: 「広告費5000円」「FX +3万」「田中さんから50万入金」',
-        '',
-        '残高や履歴の照会は Sprint 3 で実装予定です。コマンドは /help。'
-      ].join('\n'),
-      replyToMessageId: msg.message_id
-    });
+    // Free-form question or chat. Hand off to the query LLM with sheet context.
+    try {
+      const result = await answerQuery(msg.text!);
+      await sendMessage({
+        chatId: msg.chat.id,
+        text: result.answer,
+        replyToMessageId: msg.message_id
+      });
+    } catch (err) {
+      log.error('answerQuery failed', {
+        err: err instanceof Error ? err.message : String(err)
+      });
+      await sendMessage({
+        chatId: msg.chat.id,
+        text:
+          '回答できませんでした。記帳は「広告費5000円」のように、照会は「今月の利益は？」のように送ってください。コマンドは /help。',
+        replyToMessageId: msg.message_id
+      });
+    }
     return;
   }
 

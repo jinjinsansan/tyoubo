@@ -8,7 +8,7 @@
 
 - [x] **Sprint 1**: プロジェクト土台 / Sheetsクライアント / 環境変数zod検証 / Telegram `/whoami`
 - [x] **Sprint 2**: 自然文記帳 (Claude Opus 4.7 Function Calling) + 確認ボタン + audit_log fail-closed
-- [ ] Sprint 3: 残高・損益照会、`/balance` `/today` `/month` `/list` `/undo`
+- [x] **Sprint 3**: 残高・損益照会 (`/balance` `/today` `/month` `/list` `/undo`) + 自然文での照会
 - [ ] Sprint 4: 月次レポート Cron
 - [ ] Sprint 5: エラーハンドリング強化 / READMEと受け入れテスト整備
 
@@ -21,6 +21,16 @@
 - LLMはOpus 4.7プライマリ → Sonnet 4.6フォールバック（5xx/rate-limited時）
 - カテゴリマスタを動的にプロンプトへ注入（5分キャッシュ）
 - 投資家・関係者名は `counterparty` カラムへ正規化
+
+### Sprint 3 で動くこと
+
+- `/balance` — 現在残高（type×categoryで符号付き合算）+ 今月集計
+- `/today` — 本日（JST）の取引一覧
+- `/month` — 今月の収入/経費/FX損益/純損益/出資受入/分配
+- `/list [n]` — 直近 n 件 (1〜50、デフォルト10、新→旧)
+- `/undo` — 自分が記帳した最後のactiveトランザクションを論理削除（status=deleted、audit_log記録、物理削除はしない）
+- 自然文照会（「今月の利益は？」「田中さんからの入金合計」など）→ 集計値+直近80件のコンテキストを Claude へ渡して回答
+- 残高計算ルール: income +/ expense -/ fx_pnl±(category)/ deposit +/ withdrawal -/ transfer 0 (intra-pool)
 
 ## Sprint 1 セットアップ
 
@@ -90,16 +100,19 @@ curl -F "url=https://<your-public-host>/api/telegram/webhook?secret=<TELEGRAM_WE
 │   ├── llm/
 │   │   ├── client.ts                 Anthropic SDK + fallback
 │   │   ├── prompts.ts                System prompt + record_transaction tool
-│   │   └── parse-transaction.ts      自然文→ParsedTransaction
+│   │   ├── parse-transaction.ts      自然文→ParsedTransaction
+│   │   └── answer-query.ts           照会LLM (集計値+直近80件をcontext)
 │   ├── sheets/
 │   │   ├── client.ts                 Sheets API ラッパ
 │   │   ├── members.ts                仲間allowlist
 │   │   ├── categories.ts             カテゴリマスタ (5分TTLキャッシュ)
-│   │   ├── transactions.ts           appendTransaction (audit先, sheet後)
+│   │   ├── transactions.ts           append + listActive + markDeleted (fail-closed)
 │   │   └── audit.ts                  logAudit (fail-closed)
+│   ├── reports/
+│   │   └── aggregate.ts              computeBalance / computeMonthly / filter
 │   ├── telegram/
 │   │   ├── bot.ts                    sendMessage / editMessageText / answerCallbackQuery
-│   │   ├── commands.ts               /whoami /help
+│   │   ├── commands.ts               /whoami /help /balance /today /month /list /undo
 │   │   ├── format.ts                 確認カード・記帳済みカードのレンダ
 │   │   └── handlers.ts               update + callback_query dispatcher
 │   └── utils/
