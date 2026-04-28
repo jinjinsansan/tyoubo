@@ -2,7 +2,8 @@
   "crons": [
     {
       "path": "/api/cron/monthly-report",
-      "schedule": "5 15 1 * *"
+      "schedule": "5 0 1 * *"
     }
   ]
 }
+
