@@ -1,5 +1,6 @@
 import { getEnv } from '@/lib/utils/env';
 import { createLogger } from '@/lib/utils/logger';
+import { withRetry } from '@/lib/utils/retry';
 
 const log = createLogger('telegram');
 
@@ -59,23 +60,68 @@ export interface SendMessageOptions {
   disableWebPagePreview?: boolean;
 }
 
+/**
+ * Errors thrown for non-OK Telegram responses. Carries the HTTP status so
+ * the retry predicate can distinguish 5xx (transient) from 4xx (permanent).
+ * 4xx like 400 (bad payload) / 401/403 (auth) should never be retried —
+ * they'll keep failing.
+ */
+class TelegramApiError extends Error {
+  constructor(
+    public readonly method: string,
+    public readonly httpStatus: number,
+    public readonly description: string | undefined
+  ) {
+    super(`Telegram API ${method} failed (HTTP ${httpStatus}): ${description}`);
+  }
+}
+
 async function apiCall<T>(
   method: string,
   payload: Record<string, unknown>
 ): Promise<T> {
   const env = getEnv();
   const url = `${API_BASE}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+  return withRetry(
+    async () => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        result?: T;
+        description?: string;
+      };
+      if (!res.ok || !json.ok) {
+        throw new TelegramApiError(method, res.status, json.description);
+      }
+      return json.result as T;
+    },
+    {
+      attempts: 3,
+      initialDelayMs: 300,
+      maxDelayMs: 2500,
+      label: `telegram:${method}`,
+      shouldRetry: (err) => {
+        if (err instanceof TelegramApiError) {
+          return err.httpStatus >= 500 || err.httpStatus === 429;
+        }
+        // Network / DNS / fetch-thrown errors — retry once.
+        return true;
+      }
+    }
+  ).catch((err) => {
+    if (err instanceof TelegramApiError) {
+      log.error('telegram api error', {
+        method: err.method,
+        status: err.httpStatus,
+        description: err.description
+      });
+    }
+    throw err;
   });
-  const json = (await res.json()) as { ok: boolean; result?: T; description?: string };
-  if (!json.ok) {
-    log.error('telegram api error', { method, description: json.description });
-    throw new Error(`Telegram API ${method} failed: ${json.description}`);
-  }
-  return json.result as T;
 }
 
 export async function sendMessage(opts: SendMessageOptions): Promise<TelegramMessage> {

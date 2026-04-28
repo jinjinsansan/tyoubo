@@ -21,6 +21,7 @@ import {
 import { newToken, nowIso } from '@/lib/utils/id';
 import { isAllowedChat } from '@/lib/utils/env';
 import { createLogger } from '@/lib/utils/logger';
+import { checkRate } from '@/lib/utils/rate-limit';
 import type { ParsedTransaction, PendingTransaction, TxType } from '@/types/transaction';
 
 const log = createLogger('handler');
@@ -57,6 +58,20 @@ async function handleMessage(msg: TelegramMessage): Promise<void> {
       from: msg.from.id,
       text_preview: msg.text.slice(0, 40)
     });
+    return;
+  }
+
+  // Soft per-user rate limit (§9.7). One advisory reply per breach so we
+  // don't burn all 10 of the user's slots replying to themselves.
+  const rate = checkRate(msg.from.id);
+  if (!rate.ok) {
+    if (rate.retryInSec >= 5) {
+      await sendMessage({
+        chatId: msg.chat.id,
+        text: `送信頻度が高すぎます。${rate.retryInSec}秒ほど待ってから再度お試しください。`,
+        replyToMessageId: msg.message_id
+      }).catch(() => undefined);
+    }
     return;
   }
 

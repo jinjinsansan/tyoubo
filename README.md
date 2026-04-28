@@ -10,7 +10,9 @@
 - [x] **Sprint 2**: 自然文記帳 (Claude Opus 4.7 Function Calling) + 確認ボタン + audit_log fail-closed
 - [x] **Sprint 3**: 残高・損益照会 (`/balance` `/today` `/month` `/list` `/undo`) + 自然文での照会
 - [x] **Sprint 4**: 月次レポート Cron (Vercel Cron毎月1日朝発火、Telegram投稿+monthly_summary行追加)
-- [ ] Sprint 5: エラーハンドリング強化 / READMEと受け入れテスト整備
+- [x] **Sprint 5**: 仕上げ（Telegram API指数バックオフ、per-user rate limit、SHEETS_SETUP/TESTING ドキュメント整備）
+
+**v1 完成 — 受け入れテストは [`TESTING.md`](./TESTING.md) を参照**
 
 ### Sprint 2 で動くこと
 
@@ -32,6 +34,13 @@
 - 自然文照会（「今月の利益は？」「田中さんからの入金合計」など）→ 集計値+直近80件のコンテキストを Claude へ渡して回答
 - 残高計算ルール: income +/ expense -/ fx_pnl±(category)/ deposit +/ withdrawal -/ transfer 0 (intra-pool)
 
+### Sprint 5 で追加されたもの
+
+- Telegram API 呼び出しの指数バックオフリトライ（5xx / 429 / network のみ、4xx 即bubble）
+- Per-user rate limit: 60秒窓で 10 メッセージまで（§9.7）
+- [`docs/SHEETS_SETUP.md`](./docs/SHEETS_SETUP.md): 7 シートの完全な列定義 + 初期カテゴリのコピペ用データ
+- [`TESTING.md`](./TESTING.md): §12 受け入れテスト9項目をチェックボックス化、Cron手動発火コマンド、ログ scope 一覧、デバッグ Tips
+
 ### Sprint 4 で動くこと
 
 - Vercel Cron `5 0 1 * *` (JST 09:05 毎月1日) に `/api/cron/monthly-report` が発火
@@ -51,7 +60,7 @@
 - レポート対象月の判定はサーバ側で「前月」を計算するためタイミングは結果に影響しない
 - 配信時刻を JST 早朝にしたい場合は `5 14 28-31 * *` 等で複数候補日に発火 → サーバ側で「last day判定」する案もあるが v1 はシンプルに当日朝で運用
 
-## Sprint 1 セットアップ
+## セットアップ
 
 ### 1. 依存をインストール
 
@@ -63,10 +72,9 @@ npm install
 
 1. GCP Console で新規プロジェクトを作成し、**Google Sheets API** を有効化。
 2. **Service Account** を作成し、JSON鍵を発行。
-3. Google Sheets で新しいスプレッドシートを作成（名前: `KumiBooks_Master`）。
-4. 仕様書 §2 のシート 7 つ（`transactions` / `investors` / `categories` / `wallets` / `monthly_summary` / `audit_log` / `members`）を作成し、1行目にヘッダーを入れる。
-5. スプレッドシートを Service Account の email に「編集者」として共有。
-6. URLから `GOOGLE_SHEETS_ID` を控える。
+3. **[`docs/SHEETS_SETUP.md`](./docs/SHEETS_SETUP.md) に従って 7 シートを作成、ヘッダー＆初期カテゴリをコピペ。**
+4. スプレッドシートを Service Account の email に「編集者」として共有。
+5. URLから `GOOGLE_SHEETS_ID` を控える。
 
 ### 3. Telegram Bot を準備
 
@@ -102,8 +110,9 @@ curl -F "url=https://<your-public-host>/api/telegram/webhook?secret=<TELEGRAM_WE
 ### 7. 動作確認
 
 1. `members` シートに自分の Telegram ID（`/whoami` で取得可能）と `active=TRUE` を追加。
-2. グループで `/whoami` → 自分の `tg_id` と権限が返ってくれば Sprint 1 OK。
+2. グループで `/whoami` → 自分の `tg_id` と権限が返ってくる
 3. `/help` で実装済みコマンド一覧が見える。
+4. **詳細な受け入れテストは [`TESTING.md`](./TESTING.md)** を参照。
 
 ## ディレクトリ構成
 
@@ -140,10 +149,15 @@ curl -F "url=https://<your-public-host>/api/telegram/webhook?secret=<TELEGRAM_WE
 │   └── utils/
 │       ├── env.ts                    zod環境変数検証
 │       ├── logger.ts                 シークレット自動マスキング構造化ログ
-│       ├── id.ts                     UUID / token / JST today
-│       └── pending.ts                Pending state (Upstash REST + memory fallback)
+│       ├── id.ts                     UUID / token / JST today / 前月計算
+│       ├── pending.ts                Pending state (Upstash REST + memory fallback)
+│       ├── retry.ts                  指数バックオフ + jitter
+│       └── rate-limit.ts             per-user 10msg/60秒
 ├── types/
 │   └── transaction.ts                TxType / ParsedTransaction / PendingTransaction
+├── docs/
+│   └── SHEETS_SETUP.md               7シートの完全な列定義 + 初期データ
+├── TESTING.md                        §12 受け入れテスト + デバッグTips
 ├── .env.local.example
 ├── KumiBooks_spec_v1.md
 ├── next.config.mjs
